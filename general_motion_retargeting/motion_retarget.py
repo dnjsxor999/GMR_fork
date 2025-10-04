@@ -7,6 +7,38 @@ from scipy.spatial.transform import Rotation as R
 from .params import ROBOT_XML_DICT, IK_CONFIG_DICT
 from rich import print
 
+# VELOCITY_LIMITS = {
+#     'left_hip_pitch_joint': 32, 
+#     'left_hip_roll_joint': 20, 
+#     'left_hip_yaw_joint': 32, 
+#     'left_knee_joint': 20, 
+#     'left_ankle_pitch_joint': 37, 
+#     'left_ankle_roll_joint': 37, 
+#     'right_hip_pitch_joint': 32, 
+#     'right_hip_roll_joint': 20, 
+#     'right_hip_yaw_joint': 32, 
+#     'right_knee_joint': 20, 
+#     'right_ankle_pitch_joint': 37, 
+#     'right_ankle_roll_joint': 37, 
+#     'waist_yaw_joint': 32, 
+#     'waist_roll_joint': 37, 
+#     'waist_pitch_joint': 37, 
+#     'left_shoulder_pitch_joint': 37, 
+#     'left_shoulder_roll_joint': 37, 
+#     'left_shoulder_yaw_joint': 37, 
+#     'left_elbow_joint': 37, 
+#     'left_wrist_roll_joint': 37, 
+#     'left_wrist_pitch_joint': 22, 
+#     'left_wrist_yaw_joint': 22, 
+#     'right_shoulder_pitch_joint': 37, 
+#     'right_shoulder_roll_joint': 37, 
+#     'right_shoulder_yaw_joint': 37, 
+#     'right_elbow_joint': 37, 
+#     'right_wrist_roll_joint': 37, 
+#     'right_wrist_pitch_joint': 22, 
+#     'right_wrist_yaw_joint': 22
+# }
+
 class GeneralMotionRetargeting:
     """General Motion Retargeting (GMR).
     """
@@ -19,6 +51,7 @@ class GeneralMotionRetargeting:
         damping: float=5e-1, # change from 1e-1 to 1e-2.
         verbose: bool=True,
         use_velocity_limit: bool=False,
+        use_collision_avoidance: bool=False,
     ) -> None:
 
         # load the robot model
@@ -97,12 +130,76 @@ class GeneralMotionRetargeting:
 
         self.ik_limits = [mink.ConfigurationLimit(self.model)]
         if use_velocity_limit:
-            VELOCITY_LIMITS = {k: 3*np.pi for k in self.robot_motor_names.keys()}
-            self.ik_limits.append(mink.VelocityLimit(self.model, VELOCITY_LIMITS)) 
-            
+            print("Use velocity limit")
+            VELOCITY_LIMITS = {k: 5 * np.pi for k in self.robot_motor_names.keys()}
+            self.ik_limits.append(mink.VelocityLimit(self.model, VELOCITY_LIMITS))
+
+        if use_collision_avoidance:
+            print("Use collision avoidance")
+            # # geom_names = [mj.mj_id2name(self.model, mj.mjtObj.mjOBJ_GEOM, gid) for gid in range(self.model.ngeom)]
+            # geom_names = [self.model.geom(gid).name for gid in range(self.model.ngeom)]
+            # print(geom_names)
+            # # collision_pairs = self._build_self_collision_pairs()
+            collision_pairs = [
+                (["left_hand_collision"], ["right_hand_collision"]),
+                # (["left_hand_collision"], ["head_collision"]),
+                # (["right_hand_collision"], ["head_collision"]),
+            ]
+
+            self.ik_limits.append(mink.CollisionAvoidanceLimit(self.model, geom_pairs=collision_pairs, 
+                                                                        minimum_distance_from_collisions=0.05,
+                                                                        collision_detection_distance=0.1))
+
         self.setup_retarget_configuration()
         
         self.ground_offset = 0.0
+
+
+    def _build_self_collision_pairs(self):
+        """Construct collision pairs using subtree geom IDs for key limbs.
+
+        Returns a list of (geom_group_A, geom_group_B) where each group is a
+        sequence of geom IDs. Falls back to an all-vs-all group if names differ
+        across robots.
+        """
+        model = self.model
+        def subtree(body_name):
+            return mink.get_subtree_geom_ids(model, model.body(body_name).id)
+        # try:
+        # Arms and wrists
+        l_wrist_geoms = subtree("left_rubber_hand")
+        r_wrist_geoms = subtree("right_rubber_hand")
+        # l_arm_geoms = subtree("left_shoulder_pitch_link")
+        # r_arm_geoms = subtree("right_shoulder_pitch_link")
+        head_geoms = subtree("head_link")
+        # Torso
+        torso_geoms = subtree("torso_link")
+        # Construct pairs to avoid hand/arm/torso collisions
+        pairs = [
+            # (l_wrist_geoms, torso_geoms),
+            # (r_wrist_geoms, torso_geoms),
+            # (l_wrist_geoms, r_arm_geoms),
+            # (r_wrist_geoms, l_arm_geoms),
+            (l_wrist_geoms, head_geoms),
+            (r_wrist_geoms, head_geoms),
+            (l_wrist_geoms, r_wrist_geoms),
+        ]
+        return pairs
+        # except Exception:
+        #     # Fallback: one big group with all geoms vs itself (Mink filters invalid pairs)
+        #     all_geom_ids = list(range(model.ngeom))
+        #     return [(all_geom_ids, all_geom_ids)]
+            
+
+        # # Store previous configuration for pre-IK velocity constraint
+        # self.prev_qpos = None
+        # # Velocity bound magnitude (rad/s) for constraint |q_t - q_{t-1}| <= 3*pi*dt
+        # self.velocity_limit_value = 1.0 *np.pi
+
+        # # Velocity smoothing setup
+        # self.velocity_limit_enabled = use_velocity_limit
+        # # if self.velocity_limit_enabled:
+        # #     self._setup_velocity_limits()
 
     def setup_retarget_configuration(self):
         self.configuration = mink.Configuration(self.model)
@@ -179,7 +276,7 @@ class GeneralMotionRetargeting:
             curr_error = self.error1()
             dt = self.configuration.model.opt.timestep
             vel1 = mink.solve_ik(
-                self.configuration, self.tasks1, dt, self.solver, self.damping, self.ik_limits
+                self.configuration, self.tasks1, dt, self.solver, self.damping, limits=self.ik_limits
             )
             self.configuration.integrate_inplace(vel1, dt)
             next_error = self.error1()
@@ -188,7 +285,7 @@ class GeneralMotionRetargeting:
                 curr_error = next_error
                 dt = self.configuration.model.opt.timestep
                 vel1 = mink.solve_ik(
-                    self.configuration, self.tasks1, dt, self.solver, self.damping, self.ik_limits
+                    self.configuration, self.tasks1, dt, self.solver, self.damping, limits=self.ik_limits
                 )
                 self.configuration.integrate_inplace(vel1, dt)
                 next_error = self.error1()
@@ -198,7 +295,7 @@ class GeneralMotionRetargeting:
             curr_error = self.error2()
             dt = self.configuration.model.opt.timestep
             vel2 = mink.solve_ik(
-                self.configuration, self.tasks2, dt, self.solver, self.damping, self.ik_limits
+                self.configuration, self.tasks2, dt, self.solver, self.damping, limits=self.ik_limits
             )
             self.configuration.integrate_inplace(vel2, dt)
             next_error = self.error2()
@@ -208,13 +305,12 @@ class GeneralMotionRetargeting:
                 # Solve the IK problem with the second task
                 dt = self.configuration.model.opt.timestep
                 vel2 = mink.solve_ik(
-                    self.configuration, self.tasks2, dt, self.solver, self.damping, self.ik_limits
+                    self.configuration, self.tasks2, dt, self.solver, self.damping, limits=self.ik_limits
                 )
                 self.configuration.integrate_inplace(vel2, dt)
                 
                 next_error = self.error2()
                 num_iter += 1
-                
             
         return self.configuration.data.qpos.copy()
 
@@ -311,3 +407,45 @@ class GeneralMotionRetargeting:
             pos, quat = human_data[body_name]
             human_data[body_name][0] = pos - np.array([0, 0, self.ground_offset])
         return human_data
+
+    # def _apply_pre_ik_velocity_constraint(self):
+    #     """Clamp configuration delta relative to previous frame by ±(3*pi*dt).
+    #     If no previous configuration is stored, initialize it and return.
+    #     """
+    #     data = self.configuration.data
+    #     qpos = data.qpos.copy()
+    #     dt = self.configuration.model.opt.timestep
+    #     if self.prev_qpos is None:
+    #         self.prev_qpos = qpos.copy()
+    #         return
+    #     vmin = -self.velocity_limit_value
+    #     vmax = self.velocity_limit_value
+    #     min_step = vmin * dt
+    #     max_step = vmax * dt
+    #     delta = qpos - self.prev_qpos
+    #     # Clip each element of delta to [min_step, max_step]
+    #     delta_clamped = np.minimum(np.maximum(delta, min_step), max_step)
+    #     qpos[:] = self.prev_qpos + delta_clamped
+    #     self.configuration.data.qpos[:] = qpos
+
+    # def _get_mj_state(self):
+    #     """Return copies of MuJoCo state and timestep.
+    #     qpos has length nq, qvel has length nv.
+    #     """
+    #     data = self.configuration.data
+    #     qpos = data.qpos.copy()
+    #     qvel = data.qvel.copy()
+    #     dt = self.configuration.model.opt.timestep
+    #     return qpos, qvel, dt
+
+    # def _setup_velocity_limits(self, default_limit=3*np.pi):
+    #     """Initialize per-DOF velocity limits in tangent space (length nv)."""
+    #     nv = self.configuration.nv
+    #     self.vmin = -np.ones(nv) * default_limit
+    #     self.vmax =  np.ones(nv) * default_limit
+
+    # def _clamp_velocity(self, velocity):
+    #     """Clamp generalized velocity to [vmin, vmax] if enabled."""
+    #     if not self.velocity_limit_enabled:
+    #         return velocity
+    #     return np.minimum(np.maximum(velocity, self.vmin), self.vmax)

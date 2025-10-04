@@ -4,12 +4,40 @@ import os
 import time
 
 import numpy as np
+import torch
 
 from general_motion_retargeting import GeneralMotionRetargeting as GMR
 from general_motion_retargeting import RobotMotionViewer
+from general_motion_retargeting import KinematicsModel
 from general_motion_retargeting.utils.smpl import load_gvhmr_pred_file, get_gvhmr_data_offline_fast
 
 from rich import print
+
+def compute_local_body_pos(xml_file, dof_pos):
+    """Compute local body positions with root at origin and identity rotation.
+
+    Args:
+        xml_file: Path to the robot MJCF file used by the retargeter.
+        dof_pos: Numpy array of shape (T, dof_dim) with per-frame joint positions.
+
+    Returns:
+        local_body_pos: Numpy array (T, num_bodies, 3) of local body positions.
+        body_names: List of body names corresponding to the second dimension.
+    """
+    device = torch.device("cpu")
+    kinematics_model = KinematicsModel(xml_file, device=device)
+    num_frames = dof_pos.shape[0]
+    fk_root_pos = torch.zeros((num_frames, 3), device=device)
+    fk_root_rot = torch.zeros((num_frames, 4), device=device)
+    fk_root_rot[:, -1] = 1.0
+    local_body_pos_t, _ = kinematics_model.forward_kinematics(
+        fk_root_pos,
+        fk_root_rot,
+        torch.from_numpy(dof_pos).to(device=device, dtype=torch.float),
+    )
+    local_body_pos = local_body_pos_t.detach().cpu().numpy()
+    body_names = kinematics_model.body_names
+    return local_body_pos, body_names
 
 if __name__ == "__main__":
     
@@ -60,6 +88,27 @@ if __name__ == "__main__":
         help="Limit the rate of the retargeted robot motion to keep the same as the human motion.",
     )
 
+    parser.add_argument(
+        "--joint_vel_limit",
+        default=False,
+        action="store_true",
+        help="Give joint velocity limit filtering"
+    )
+
+    parser.add_argument(
+        "--offset_ground",
+        default=False,
+        action="store_true",
+        help="Give offset ground"
+    )
+
+    parser.add_argument(
+        "--collision_avoid",
+        default=False,
+        action="store_true",
+        help="Give collision avoidance"
+    )
+
     args = parser.parse_args()
 
 
@@ -75,15 +124,15 @@ if __name__ == "__main__":
     tgt_fps = 30
     smplx_data_frames, aligned_fps = get_gvhmr_data_offline_fast(smplx_data, body_model, smplx_output, tgt_fps=tgt_fps)
     
-    
-   
     # Initialize the retargeting system
     retarget = GMR(
         actual_human_height=actual_human_height,
         src_human="smplx",
         tgt_robot=args.robot,
+        use_velocity_limit=args.joint_vel_limit,
+        use_collision_avoidance=args.collision_avoid,
     )
-    
+
     robot_motion_viewer = RobotMotionViewer(robot_type=args.robot,
                                             motion_fps=aligned_fps,
                                             transparent_robot=0,
@@ -127,7 +176,7 @@ if __name__ == "__main__":
         smplx_data = smplx_data_frames[i]
 
         # retarget
-        qpos = retarget.retarget(smplx_data)
+        qpos = retarget.retarget(smplx_data, args.offset_ground)
 
         # visualize
         robot_motion_viewer.step(
@@ -149,9 +198,10 @@ if __name__ == "__main__":
         # save from wxyz to xyzw
         root_rot = np.array([qpos[3:7][[1,2,3,0]] for qpos in qpos_list])
         dof_pos = np.array([qpos[7:] for qpos in qpos_list])
-        local_body_pos = None
-        body_names = None
-        
+
+        # Compute local body positions via helper
+        local_body_pos, body_names = compute_local_body_pos(retarget.xml_file, dof_pos)
+
         motion_data = {
             "fps": aligned_fps,
             "root_pos": root_pos,
