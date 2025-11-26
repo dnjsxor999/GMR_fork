@@ -62,7 +62,10 @@ def process_single_gvhmr_file(gvhmr_file_path, output_dir, robot_type, args):
         args: Command line arguments
     """
     HERE = pathlib.Path(__file__).parent
-    SMPLX_FOLDER = HERE / ".." / "assets" / "body_models"
+    # Use GVHMR body models path (GMR assets doesn't have body_models)
+    # smplx.create() expects model_path to be the parent directory, and will look for smplx/ subdirectory inside
+    REPO_ROOT = HERE.parents[2]  # Go up to Switch4EAI root (scripts -> GMR -> third_party -> Switch4EAI)
+    SMPLX_FOLDER = REPO_ROOT / "third_party" / "GVHMR" / "inputs" / "checkpoints" / "body_models"
     
     # Extract motion name from the file path
     motion_name = os.path.basename(os.path.dirname(gvhmr_file_path))

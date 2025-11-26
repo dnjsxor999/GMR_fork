@@ -14,8 +14,8 @@ def load_smpl_file(smpl_file):
 def load_smplx_file(smplx_file, smplx_body_model_path):
     smplx_data = np.load(smplx_file, allow_pickle=True)
     body_model = smplx.create(
-        smplx_body_model_path,
-        "smplx",
+        model_path=str(smplx_body_model_path),
+        model_type="smplx",
         gender=str(smplx_data["gender"]),
         use_pca=False,
     )
@@ -73,8 +73,8 @@ def load_gvhmr_pred_file(gvhmr_pred_file, smplx_body_model_path):
     }
 
     body_model = smplx.create(
-        smplx_body_model_path,
-        "smplx",
+        model_path=str(smplx_body_model_path),
+        model_type="smplx",
         gender="neutral",
         use_pca=False,
     )
