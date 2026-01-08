@@ -113,12 +113,14 @@ def process_single_gvhmr_file(gvhmr_file_path, output_dir, robot_type, args):
         
         # Process all frames
         qpos_list = []
+        qvel_list = []
         for i in range(len(smplx_data_frames)):
             smplx_data = smplx_data_frames[i]
             
             # retarget
-            qpos = retarget.retarget(smplx_data, args.offset_ground)
+            qpos, qvel = retarget.retarget(smplx_data, args.offset_ground)
             qpos_list.append(qpos)
+            qvel_list.append(qvel)
             
             # visualize
             robot_motion_viewer.step(
@@ -140,6 +142,12 @@ def process_single_gvhmr_file(gvhmr_file_path, output_dir, robot_type, args):
         root_rot = np.array([qpos[3:7][[1,2,3,0]] for qpos in qpos_list])
         dof_pos = np.array([qpos[7:] for qpos in qpos_list])
 
+        qvel_array = np.array(qvel_list)
+        # qvel layout: [root_vel(3), root_ang_vel(3), dof_vel(N)]
+        root_vel = qvel_array[:, :3]
+        root_ang_vel = qvel_array[:, 3:6]
+        dof_vel = qvel_array[:, 6:]
+
         # Compute local body positions via helper
         local_body_pos, body_names = compute_local_body_pos(retarget.xml_file, dof_pos)
 
@@ -148,6 +156,9 @@ def process_single_gvhmr_file(gvhmr_file_path, output_dir, robot_type, args):
             "root_pos": root_pos,
             "root_rot": root_rot,
             "dof_pos": dof_pos,
+            "root_vel": root_vel,
+            "root_ang_vel": root_ang_vel,
+            "dof_vel": dof_vel,
             "local_body_pos": local_body_pos,
             "link_body_list": body_names,
         }

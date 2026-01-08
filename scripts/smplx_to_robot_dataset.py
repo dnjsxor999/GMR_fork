@@ -82,11 +82,14 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
         actual_human_height=actual_human_height,
     )
     qpos_list = []
+    qvel_list = []
     for smplx_frame_data in smplx_frame_data_list:
-        qpos = retargeter.retarget(smplx_frame_data)
+        qpos, qvel = retargeter.retarget(smplx_frame_data)
         qpos_list.append(qpos.copy())
+        qvel_list.append(qvel.copy())
 
     qpos_list = np.array(qpos_list)
+    qvel_list = np.array(qvel_list)
 
     log_memory("After retargeting")
     
@@ -101,6 +104,12 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
     root_rot = qpos_list[:, 3:7]
     root_rot[:, [0, 1, 2, 3]] = root_rot[:, [1, 2, 3, 0]]
     dof_pos = qpos_list[:, 7:]
+    
+    # Extract velocities: qvel = [root_vel(3), root_ang_vel(3), dof_vel(N)]
+    root_vel = qvel_list[:, :3]  # Linear velocity
+    root_ang_vel = qvel_list[:, 3:6]  # Angular velocity
+    dof_vel = qvel_list[:, 6:]  # Joint velocities
+    
     num_frames = root_pos.shape[0]
 
     fk_root_pos = torch.zeros((num_frames, 3), device=device)
@@ -136,6 +145,9 @@ def process_file(smplx_file_path, tgt_file_path, tgt_robot, SMPLX_FOLDER, tgt_fo
         "root_pos": root_pos,
         "root_rot": root_rot,
         "dof_pos": dof_pos,
+        "root_vel": root_vel,
+        "root_ang_vel": root_ang_vel,
+        "dof_vel": dof_vel,
         "local_body_pos": local_body_pos.detach().cpu().numpy(),
         "link_body_list": body_names,
     }

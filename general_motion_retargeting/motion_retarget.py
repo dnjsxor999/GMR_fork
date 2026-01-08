@@ -271,6 +271,8 @@ class GeneralMotionRetargeting:
         # Update the task targets
         self.update_targets(human_data, offset_to_ground)
 
+        final_vel = None  # Store the final velocity computed by IK
+
         if self.use_ik_match_table1:
             # Solve the IK problem
             curr_error = self.error1()
@@ -290,6 +292,7 @@ class GeneralMotionRetargeting:
                 self.configuration.integrate_inplace(vel1, dt)
                 next_error = self.error1()
                 num_iter += 1
+            final_vel = vel1.copy()  # Save the final velocity from task1
 
         if self.use_ik_match_table2:
             curr_error = self.error2()
@@ -311,8 +314,14 @@ class GeneralMotionRetargeting:
                 
                 next_error = self.error2()
                 num_iter += 1
-            
-        return self.configuration.data.qpos.copy()
+            final_vel = vel2.copy()  # Save the final velocity from task2 (overwrites if task1 was used)
+        
+        # Set the velocity in configuration.data.qvel so it can be accessed
+        if final_vel is not None:
+            self.configuration.data.qvel[:] = final_vel
+        
+        # print(self.configuration.data.qvel.copy())
+        return self.configuration.data.qpos.copy(), self.configuration.data.qvel.copy()
 
 
     def error1(self):

@@ -176,7 +176,7 @@ if __name__ == "__main__":
         smplx_data = smplx_data_frames[i]
 
         # retarget
-        qpos = retarget.retarget(smplx_data, args.offset_ground)
+        qpos, qvel = retarget.retarget(smplx_data, args.offset_ground)
 
         # visualize
         robot_motion_viewer.step(
