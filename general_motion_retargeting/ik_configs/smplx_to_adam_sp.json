@@ -70,7 +70,7 @@
                 -0.5
             ]
         ],
-        "toeLeft": [
+        "foot_bottom_left": [
             "left_foot",
             100,
             10,
@@ -118,7 +118,7 @@
                 -0.5
             ]
         ],
-        "foot_bottom_left": [
+        "foot_bottom_right": [
             "right_foot",
             100,
             10,
